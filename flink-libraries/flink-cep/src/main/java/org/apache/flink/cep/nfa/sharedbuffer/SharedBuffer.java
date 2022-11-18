@@ -50,6 +50,10 @@ import java.util.Timer;
 import java.util.TimerTask;
 
 /**
+ * 一种共享缓冲区实现，在相应的状态下存储值。此外，可以对这些值进行版本控制，以便可以在缓冲区中检索它们的前置元素。
+ * 实现的想法是为传入事件提供一个缓冲区，并为其分配唯一的ID。这样，我们在处理过程中不需要反序列化事件，只存储事件的一个副本。
+ * SharedBuffer中的条目是SharedBufferNode。共享缓冲区节点允许存储不同条目之间的关系。杜威版本控制方案允许区分不同的关系（例如前面的元素）。
+ * （注释：主要解决的事情是在同一个元素触发多个分支的时候避免存储多次）
  * A shared buffer implementation which stores values under according state. Additionally, the
  * values can be versioned such that it is possible to retrieve their predecessor element in the
  * buffer.
@@ -78,10 +82,19 @@ public class SharedBuffer<V> {
     private static final String EVENTS_STATE_NAME = "sharedBuffer-events";
     private static final String EVENTS_COUNT_STATE_NAME = "sharedBuffer-events-count";
 
+    /**
+     * key是EventId value是对应的值，存储所匹配到的事件的id和对应的value值，用于输出的时候根据id取得数据
+     */
     private final MapState<EventId, Lockable<V>> eventsBuffer;
-    /** The number of events seen so far in the stream per timestamp. */
+    /** 每个时间戳到目前为止在流中看到的事件数
+     * The number of events seen so far in the stream per timestamp. */
     private final MapState<Long, Integer> eventsCount;
 
+    /**
+     * key是NodeId 是事件在该缓存中的一个标志，value 是SharedBufferNode 存放这个节点所对应的各个版本的前置节点（value中含有指向目标entry的版本化的边）。
+     * 匹配到的事件会存放在这个缓存当中，并且保存事件间的关系和版本号。
+     * 匹配过程中主要使用的就是这个版本。
+     */
     private final MapState<NodeId, Lockable<SharedBufferNode>> entries;
 
     /** The cache of eventsBuffer State. */
@@ -256,6 +269,7 @@ public class SharedBuffer<V> {
     }
 
     /**
+     * 构造一个访问器来处理这个sharedBuffer。
      * Construct an accessor to deal with this sharedBuffer.
      *
      * @return an accessor to deal with this sharedBuffer.

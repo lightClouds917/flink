@@ -36,7 +36,9 @@ import java.util.Objects;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
-/** An entry in {@link SharedBuffer} that allows to store relations between different entries. */
+/**
+ * {@link SharedBuffer}中的一个条目，允许存储不同条目之间的关系
+ * An entry in {@link SharedBuffer} that allows to store relations between different entries. */
 public class SharedBufferNode {
 
     private final List<Lockable<SharedBufferEdge>> edges;

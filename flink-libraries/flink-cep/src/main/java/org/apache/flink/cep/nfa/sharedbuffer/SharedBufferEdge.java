@@ -32,17 +32,26 @@ import java.util.Objects;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
-/** Versioned edge in {@link SharedBuffer} that allows retrieving predecessors. */
+/**
+ * {@link SharedBuffer}中的版本化的边，允许检索前辈。
+ * Versioned edge in {@link SharedBuffer} that allows retrieving predecessors. */
 public class SharedBufferEdge {
 
+    /**
+     * 目标entry的id
+     */
     private final NodeId target;
+    /**
+     * 版本号
+     */
     private final DeweyNumber deweyNumber;
 
     /**
+     * 创建指向目标entry的版本化（带有{@link DeweyNumber}）边。
      * Creates versioned (with {@link DeweyNumber}) edge that points to the target entry.
      *
-     * @param target id of target entry
-     * @param deweyNumber version for this edge
+     * @param target id of target entry 目标entry的id
+     * @param deweyNumber version for this edge 这个边的版本
      */
     public SharedBufferEdge(NodeId target, DeweyNumber deweyNumber) {
         this.target = target;

@@ -122,9 +122,10 @@ public class DeweyNumber implements Serializable {
     }
 
     /**
+     * 由此创建一个新的杜威数，以便将0追加为新的最后一位数字。
      * Creates a new dewey number from this such that a 0 is appended as new last digit.
      *
-     * @return A new dewey number which contains this as a prefix and has 0 as last digit
+     * @return A new dewey number which contains this as a prefix and has 0 as last digit 一个新的杜威数，它包含这个作为前缀，最后一个数字是0
      */
     public DeweyNumber addStage() {
         int[] newDeweyNumber = Arrays.copyOf(deweyNumber, deweyNumber.length + 1);

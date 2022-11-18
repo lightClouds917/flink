@@ -26,6 +26,8 @@ import java.util.Collection;
 import java.util.Objects;
 
 /**
+ * 代表NFA的一个状态。
+ * 每个状态都由名称和状态类型标识。此外，它还包含状态转换的集合。状态转换描述在哪些条件下可以进入新状态。
  * Represents a state of the {@link NFA}.
  *
  * <p>Each state is identified by a name and a state type. Furthermore, it contains a collection of
@@ -37,8 +39,17 @@ import java.util.Objects;
 public class State<T> implements Serializable {
     private static final long serialVersionUID = 6658700025989097781L;
 
+    /**
+     * 状态名称
+     */
     private final String name;
+    /**
+     * 状态类型 start,final。。。
+     */
     private StateType stateType;
+    /**
+     * 状态到下一个状态的过度条件
+     */
     private final Collection<StateTransition<T>> stateTransitions;
 
     public State(final String name, final StateType stateType) {

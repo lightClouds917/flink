@@ -24,6 +24,7 @@ import java.io.Serializable;
 import java.util.Objects;
 
 /**
+ * 表示从一个{@link State}到另一个的转换。
  * Represents a transition from one {@link State} to another.
  *
  * @param <T> type of events that are handled by the {@link IterativeCondition}

@@ -610,6 +610,7 @@ public class NFACompiler {
         }
 
         /**
+         * 创建一个简单的单一状态。对于可选状态，它还包括一个类似的状态，没有继续边，因此对于计算状态图中的每个继续转移分支，只能创建一次。
          * Creates a simple single state. For an OPTIONAL state it also consists of a similar state
          * without the PROCEED edge, so that for each PROCEED transition branches in computation
          * state graph can be created only once.
@@ -627,15 +628,17 @@ public class NFACompiler {
                     isPatternOptional(currentPattern));
         }
 
+        //TODO
         /**
+         * 创建一个简单的单一状态。对于可选状态OPTIONAL，它还包括一个类似的没有PROCEED边的状态，因此对于计算状态图中的每个PROCEED转移分支，只能创建一次。
          * Creates a simple single state. For an OPTIONAL state it also consists of a similar state
          * without the PROCEED edge, so that for each PROCEED transition branches in computation
          * state graph can be created only once.
          *
-         * @param ignoreCondition condition that should be applied to IGNORE transition
-         * @param sinkState state that the state being converted should point to
-         * @param proceedState state that the state being converted should proceed to
-         * @param isOptional whether the state being converted is optional
+         * @param ignoreCondition condition that should be applied to IGNORE transition 应应用于忽略转换的条件
+         * @param sinkState state that the state being converted should point to 要转换的状态应指向的状态
+         * @param proceedState state that the state being converted should proceed to 要转换的状态应继续
+         * @param isOptional whether the state being converted is optional 正在转换的状态是否为可选状态
          * @return the created state
          */
         @SuppressWarnings("unchecked")
@@ -652,14 +655,16 @@ public class NFACompiler {
 
             final State<T> singletonState =
                     createState(currentPattern.getName(), State.StateType.Normal);
-            // if event is accepted then all notPatterns previous to the optional states are no
-            // longer valid
+            //如果事件被接受，则可选状态之前的所有notPatterns将不再有效
+            // if event is accepted then all notPatterns previous to the optional states are no longer valid
             final State<T> sink = copyWithoutTransitiveNots(sinkState);
             singletonState.addTake(sink, takeCondition);
 
+            //如果未接受任何元素，则之前的NOT仍然有效。
             // if no element accepted the previous nots are still valid.
             final IterativeCondition<T> proceedCondition = getTrueFunction();
 
+            //对于组模式的第一个状态，其前进边应指向该组模式的以下状态，并且该边将添加到为该组模式创建NFA的末尾
             // for the first state of a group pattern, its PROCEED edge should point to the
             // following state of
             // that group pattern and the edge will be added at the end of creating the NFA for that
@@ -992,6 +997,7 @@ public class NFACompiler {
     }
 
     /**
+     * NFA工厂实现
      * Implementation of the {@link NFAFactory} interface.
      *
      * <p>The implementation takes the input type serializer, the window time and the set of states
@@ -1003,8 +1009,11 @@ public class NFACompiler {
 
         private static final long serialVersionUID = 8939783698296714379L;
 
+        //时间窗口
         private final long windowTime;
+        //状态集合
         private final Collection<State<T>> states;
+        //是否超时处理的标志
         private final boolean timeoutHandling;
 
         private NFAFactoryImpl(
@@ -1015,8 +1024,13 @@ public class NFACompiler {
             this.timeoutHandling = timeoutHandling;
         }
 
+        /**
+         * 创建NFA状态机
+         * @return
+         */
         @Override
         public NFA<T> createNFA() {
+            //创建NFA状态机
             return new NFA<>(states, windowTime, timeoutHandling);
         }
     }

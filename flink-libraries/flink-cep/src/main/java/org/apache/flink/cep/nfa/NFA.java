@@ -60,7 +60,14 @@ import java.util.Stack;
 import static org.apache.flink.cep.nfa.MigrationUtils.deserializeComputationStates;
 
 /**
+ * 非确定有限状态机实现
  * Non-deterministic finite automaton implementation.
+ *
+ *
+ * keyed 模式的输入流，cep operator为每一个key保留一个NFA,非keyed模式，使用一个全局的NFA。处理事件时，它会更新NFA的内部状态机。
+ * 属于部分匹配序列的事件保存在内部缓冲区SharedBuffer中，这是一种内存优化的数据结构，正是为了实现这一目的。
+ * 当包含缓冲区中事件的所有匹配序列满足以下条件时，缓冲区中的事件将被删除：
+ *
  *
  * <p>The {@link org.apache.flink.cep.operator.CepOperator CEP operator} keeps one NFA per key, for
  * keyed input streams, and a single global NFA for non-keyed ones. When an event gets processed, it
@@ -71,9 +78,9 @@ import static org.apache.flink.cep.nfa.MigrationUtils.deserializeComputationStat
  * in the buffer are removed when all the matched sequences that contain them are:
  *
  * <ol>
- *   <li>emitted (success)
- *   <li>discarded (patterns containing NOT)
- *   <li>timed-out (windowed patterns)
+ *   <li>emitted (success) 发送到下一个状态
+ *   <li>discarded (patterns containing NOT) 丢弃
+ *   <li>timed-out (windowed patterns) 超时
  * </ol>
  *
  * <p>The implementation is strongly based on the paper "Efficient Pattern Matching over Event
@@ -86,12 +93,14 @@ import static org.apache.flink.cep.nfa.MigrationUtils.deserializeComputationStat
 public class NFA<T> {
 
     /**
+     * NFA编译器返回的所有有效NFA状态的集合。这些直接来自用户指定的模式。
      * A set of all the valid NFA states, as returned by the {@link NFACompiler NFACompiler}. These
      * are directly derived from the user-specified pattern.
      */
     private final Map<String, State<T>> states;
 
     /**
+     * pattern的窗口的长度，由Pattern#within(Time)指定
      * The length of a windowed pattern, as specified using the {@link
      * org.apache.flink.cep.pattern.Pattern#within(Time)} Pattern.within(Time)} method.
      */
@@ -109,10 +118,12 @@ public class NFA<T> {
             final boolean handleTimeout) {
         this.windowTime = windowTime;
         this.handleTimeout = handleTimeout;
+        //加载所有的状态
         this.states = loadStates(validStates);
     }
 
     private Map<String, State<T>> loadStates(final Collection<State<T>> validStates) {
+        //<状态名称，状态>
         Map<String, State<T>> tmp = new HashMap<>(4);
         for (State<T> state : validStates) {
             tmp.put(state.getName(), state);
@@ -126,15 +137,23 @@ public class NFA<T> {
     }
 
     public NFAState createInitialNFAState() {
+        //表示的是一系列当前匹配到的计算状态，每一个状态在拿到下一个元素的时候都会根据condition判断自己是能够继续往下匹配生成下一个computation state还是匹配失败。
         Queue<ComputationState> startingStates = new LinkedList<>();
         for (State<T> state : states.values()) {
             if (state.isStart()) {
+                //找出所有的初始状态
                 startingStates.add(ComputationState.createStartState(state.getName()));
             }
         }
+        //初始状态放入半匹配优先级队列中
         return new NFAState(startingStates);
     }
 
+    /**
+     * 从状态机的状态中根据状态名称获取状态
+     * @param state
+     * @return
+     */
     private State<T> getState(ComputationState state) {
         return states.get(state.getCurrentStateName());
     }
@@ -179,6 +198,8 @@ public class NFA<T> {
     }
 
     /**
+     * NFA的初始化方法。在传递任何元素之前调用它，因此适合一次性设置工作。
+     *
      * Initialization method for the NFA. It is called before any element is passed and thus
      * suitable for one time setup work.
      *
@@ -186,10 +207,15 @@ public class NFA<T> {
      * @param conf The configuration containing the parameters attached to the contract.
      */
     public void open(RuntimeContext cepRuntimeContext, Configuration conf) throws Exception {
+        //遍历状态机中所有的状态 （顶点）
         for (State<T> state : getStates()) {
+            //遍历每个状态的转换条件
             for (StateTransition<T> transition : state.getStateTransitions()) {
+                //转换条件
                 IterativeCondition condition = transition.getCondition();
+                //给每个条件设置运行时上下文
                 FunctionUtils.setFunctionRuntimeContext(condition, cepRuntimeContext);
+                //运行条件
                 FunctionUtils.openFunction(condition, conf);
             }
         }
@@ -206,6 +232,9 @@ public class NFA<T> {
     }
 
     /**
+     * 处理下一个输入事件。如果部分计算达到最终状态，则返回生成的事件序列。如果计算超时和超时处理被激活，则会返回超时事件模式。
+     * 如果计算达到停止状态，则丢弃前进路径，并返回当前构造的路径以及导致停止状态的元素。
+     *
      * Processes the next input event. If some of the computations reach a final state then the
      * resulting event sequences are returned. If computations time out and timeout handling is
      * activated, then the timed out event patterns are returned.
@@ -302,6 +331,16 @@ public class NFA<T> {
                 && timestamp - state.getStartTimestamp() >= windowTime;
     }
 
+    /**
+     * nfa处理逻辑
+     * @param sharedBufferAccessor
+     * @param nfaState
+     * @param event
+     * @param afterMatchSkipStrategy
+     * @param timerService
+     * @return
+     * @throws Exception
+     */
     private Collection<Map<String, List<T>>> doProcess(
             final SharedBufferAccessor<T> sharedBufferAccessor,
             final NFAState nfaState,
@@ -310,13 +349,18 @@ public class NFA<T> {
             final TimerService timerService)
             throws Exception {
 
+        //局部匹配队列 （已经匹配了的state队列）需要匹配的状态队列？
         final PriorityQueue<ComputationState> newPartialMatches =
                 new PriorityQueue<>(NFAState.COMPUTATION_STATE_COMPARATOR);
+        //潜在匹配队列  匹配完成的状态队列？
         final PriorityQueue<ComputationState> potentialMatches =
                 new PriorityQueue<>(NFAState.COMPUTATION_STATE_COMPARATOR);
 
+        // 遍历状态机中当前所有的状态集
         // iterate over all current computations
         for (ComputationState computationState : nfaState.getPartialMatches()) {
+            //根据给定的计算状态、当前事件、其时间戳和内部状态机计算下一个计算状态，并存储匹配事件到缓存中
+            //TODO 这里是核心处理逻辑
             final Collection<ComputationState> newComputationStates =
                     computeNextStates(sharedBufferAccessor, computationState, event, timerService);
 
@@ -326,28 +370,34 @@ public class NFA<T> {
                 nfaState.setStateChanged();
             }
 
+            //延迟添加新的计算状态，以防达到停止状态并放弃这条路径。
             // delay adding new computation states in case a stop state is reached and we discard
             // the path.
             final Collection<ComputationState> statesToRetain = new ArrayList<>();
+            //是否在此路径中达到停止状态
             // if stop state reached in this path
             boolean shouldDiscardPath = false;
             for (final ComputationState newComputationState : newComputationStates) {
 
                 if (isFinalState(newComputationState)) {
+                    //如果是final state，添加到potentialMatches
                     potentialMatches.add(newComputationState);
                 } else if (isStopState(newComputationState)) {
+                    //已达到停止状态。释放共享缓存sharedBuffer中 停止状态的条目
                     // reached stop state. release entry for the stop state
                     shouldDiscardPath = true;
                     sharedBufferAccessor.releaseNode(
                             newComputationState.getPreviousBufferEntry(),
                             newComputationState.getVersion());
                 } else {
+                    //添加新的计算状态；它将在下一个事件到达后进行处理
                     // add new computation state; it will be processed once the next event arrives
                     statesToRetain.add(newComputationState);
                 }
             }
 
             if (shouldDiscardPath) {
+                //此分支中已达到停止状态。释放导致从缓冲区中删除上一个事件的分支
                 // a stop state was reached in this branch. release branch which results in removing
                 // previous event from
                 // the buffer
@@ -374,7 +424,9 @@ public class NFA<T> {
                     newPartialMatches,
                     result);
         } else {
+            //根据potentialMatches中到达finish状态的ComputationState来回溯匹配完成的事件序列
             for (ComputationState match : potentialMatches) {
+                //TODO 根据匹配完成的状态列表PartialMatches 回溯出事件序列
                 Map<String, List<T>> materializedMatch =
                         sharedBufferAccessor.materializeMatch(
                                 sharedBufferAccessor
@@ -441,11 +493,19 @@ public class NFA<T> {
                 <= 0;
     }
 
+    /**
+     * 是否是相等的状态
+     * @param s1
+     * @param s2
+     * @param <T>
+     * @return
+     */
     private static <T> boolean isEquivalentState(final State<T> s1, final State<T> s2) {
         return s1.getName().equals(s2.getName());
     }
 
     /**
+     * 用于存储已解决的转换的类。它在插入时统计忽略和采取操作的分支转换数。
      * Class for storing resolved transitions. It counts at insert time the number of branching
      * transitions both for IGNORE and TAKE actions.
      */
@@ -461,6 +521,10 @@ public class NFA<T> {
             this.currentState = currentState;
         }
 
+        /**
+         * 统计ignor和take
+         * @param edge
+         */
         void add(StateTransition<T> edge) {
 
             if (!isSelfIgnore(edge)) {
@@ -538,6 +602,7 @@ public class NFA<T> {
     }
 
     /**
+     * 根据给定的计算状态、当前事件、其时间戳和内部状态机计算下一个计算状态。算法是：
      * Computes the next computation states based on the given computation state, the current event,
      * its timestamp and the internal state machine. The algorithm is:
      *
@@ -587,9 +652,14 @@ public class NFA<T> {
                 new ConditionContext(
                         sharedBufferAccessor, computationState, timerService, event.getTimestamp());
 
+        //创建决策图 当前状态计算结果，或者继续往下一个节点计算状态
+        //根据当前的computationState和事件计算出事件的所有迁移边StateTransition
         final OutgoingEdges<T> outgoingEdges =
                 createDecisionGraph(context, computationState, event.getEvent());
 
+        //基于之前计算的边创建计算版本
+        //我们需要推迟计算状态的创建，直到我们知道有多少条边开始
+        //在这种计算状态下，我们可以分配适当的版本
         // Create the computing version based on the previously computed edges
         // We need to defer the creation of computation states until we know how many edges start
         // at this computation state so that we can assign proper version
@@ -598,7 +668,9 @@ public class NFA<T> {
         int ignoreBranchesToVisit = outgoingEdges.getTotalIgnoreBranches();
         int totalTakeToSkip = Math.max(0, outgoingEdges.getTotalTakeBranches() - 1);
 
+        //TODO 这里应该是要分裂？
         final List<ComputationState> resultingComputationStates = new ArrayList<>();
+        //遍历所有的迁移边
         for (StateTransition<T> edge : edges) {
             switch (edge.getAction()) {
                 case IGNORE:
@@ -636,16 +708,23 @@ public class NFA<T> {
                     }
                     break;
                 case TAKE:
+                    //下一个state
                     final State<T> nextState = edge.getTargetState();
+                    //当前state
                     final State<T> currentState = edge.getSourceState();
 
+                    //TODO
                     final NodeId previousEntry = computationState.getPreviousBufferEntry();
 
+                    //根据take的数量增加版本号
                     final DeweyNumber currentVersion =
                             computationState.getVersion().increase(takeBranchesToVisit);
+                    //take事件之后增加版本的stage，即增加版本号长度，之前版本为该版本的前缀用于回溯时判断是否是在同一个run中。后面会举例说明。
                     final DeweyNumber nextVersion = new DeweyNumber(currentVersion).addStage();
                     takeBranchesToVisit--;
 
+                    //添加到sharedBuffer中，返回此事件在缓存中的id
+                    //把当前的事件存入sharedBuffer 并且指向previousEntry 版本号为currentVersion 用于回溯事件序列
                     final NodeId newEntry =
                             sharedBufferAccessor.put(
                                     currentState.getName(),
@@ -663,6 +742,8 @@ public class NFA<T> {
                         startEventId = computationState.getStartEventID();
                     }
 
+                    //添加计算状态到 resultingComputationStates，更新缓存中事件的引用计数
+                    //更新当前的ComputationState previousEntry更新为newEntry(当前到达的)，版本为增加stage的版本nextVersion，state为take后的nextState
                     addComputationState(
                             sharedBufferAccessor,
                             resultingComputationStates,
@@ -672,7 +753,9 @@ public class NFA<T> {
                             startTimestamp,
                             startEventId);
 
+                    //检查新创建的状态是否可选（有一个到最终状态的PROCEED路径）
                     // check if newly created state is optional (have a PROCEED path to Final state)
+                    //遍历nextState状态的转换，获取可达的final状态
                     final State<T> finalState =
                             findFinalStateAfterProceed(context, nextState, event.getEvent());
                     if (finalState != null) {
@@ -708,6 +791,7 @@ public class NFA<T> {
                     computationState.getPreviousBufferEntry(), computationState.getVersion());
         }
 
+        //返回更新后的ComputationState
         return resultingComputationStates;
     }
 
@@ -732,18 +816,26 @@ public class NFA<T> {
         sharedBufferAccessor.lockNode(previousEntry, computationState.getVersion());
     }
 
+    /**
+     * 获取状态Proceed之后的final状态
+     */
     private State<T> findFinalStateAfterProceed(ConditionContext context, State<T> state, T event) {
+        //等待检查的状态 栈
         final Stack<State<T>> statesToCheck = new Stack<>();
         statesToCheck.push(state);
         try {
             while (!statesToCheck.isEmpty()) {
                 final State<T> currentState = statesToCheck.pop();
+                //遍历状态的状态转换  顶点的边
                 for (StateTransition<T> transition : currentState.getStateTransitions()) {
+                    //如果状态转换动作为PROCEED && 边的条件满足
                     if (transition.getAction() == StateTransitionAction.PROCEED
                             && checkFilterCondition(context, transition.getCondition(), event)) {
                         if (transition.getTargetState().isFinal()) {
+                            //如果状态的下一个状态为final状态，则返回此final状态
                             return transition.getTargetState();
                         } else {
+                            //否则把下一个状态压栈，继续循环找下一个
                             statesToCheck.push(transition.getTargetState());
                         }
                     }
@@ -762,22 +854,36 @@ public class NFA<T> {
                 : ignoreBranches + Math.max(1, takeBranches);
     }
 
+    /**
+     *
+     * @param context
+     * @param computationState
+     * @param event
+     * @return 当前状态上，所有的状态转换中，满足condition条件，且action为take的状态转换 StateTransition
+     */
     private OutgoingEdges<T> createDecisionGraph(
             ConditionContext context, ComputationState computationState, T event) {
+        //获取当前状态
         State<T> state = getState(computationState);
         final OutgoingEdges<T> outgoingEdges = new OutgoingEdges<>(state);
 
         final Stack<State<T>> states = new Stack<>();
+        //入栈
         states.push(state);
 
+        //首先创建所有出边，以便能够对杜威版本进行推理
         // First create all outgoing edges, so to be able to reason about the Dewey version
+        //只要状态栈不为空，就一直向后处理
         while (!states.isEmpty()) {
             State<T> currentState = states.pop();
+            //获取当前状态的转换集合 （顶点的多条边）
             Collection<StateTransition<T>> stateTransitions = currentState.getStateTransitions();
 
+            //遍历当前状态的转换，检查每个状态的所有状态转换
             // check all state transitions for each state
             for (StateTransition<T> stateTransition : stateTransitions) {
                 try {
+                    //如果filter条件计算为true或者条件为空，根据状态转换的动作进行对应的处理 （用户的condition条件为true）
                     if (checkFilterCondition(context, stateTransition.getCondition(), event)) {
                         // filter condition is true
                         switch (stateTransition.getAction()) {
@@ -785,10 +891,12 @@ public class NFA<T> {
                                 // simply advance the computation state, but apply the current event
                                 // to it
                                 // PROCEED is equivalent to an epsilon transition
+                                //获取下一个状态 入栈，然后继续处理（外层是个while true的，只要栈不为空，会一直向下一个状态走）
                                 states.push(stateTransition.getTargetState());
                                 break;
                             case IGNORE:
                             case TAKE:
+                                //状态转换添加到 outgoingEdges
                                 outgoingEdges.add(stateTransition);
                                 break;
                         }
@@ -801,12 +909,21 @@ public class NFA<T> {
         return outgoingEdges;
     }
 
+    /**
+     * 计算用户的condition是否满足
+     * @param context
+     * @param condition
+     * @param event
+     * @return
+     * @throws Exception
+     */
     private boolean checkFilterCondition(
             ConditionContext context, IterativeCondition<T> condition, T event) throws Exception {
         return condition == null || condition.filter(event, context);
     }
 
     /**
+     * 提取从开始到给定计算状态的所有事件序列。事件序列作为映射返回，其中包含事件和事件映射到的状态的名称。
      * Extracts all the sequences of events from the start to the given computation state. An event
      * sequence is returned as a map which contains the events and the names of the states to which
      * the events were mapped.

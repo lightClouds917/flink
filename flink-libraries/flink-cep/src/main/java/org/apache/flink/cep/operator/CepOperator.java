@@ -98,6 +98,9 @@ public class CepOperator<IN, KEY, OUT>
 
     private final NFACompiler.NFAFactory<IN> nfaFactory;
 
+    /**
+     * 计算状态列表
+     */
     private transient ValueState<NFAState> computationStates;
     private transient MapState<Long, List<IN>> elementQueueState;
     private transient SharedBuffer<IN> partialMatches;
@@ -124,6 +127,7 @@ public class CepOperator<IN, KEY, OUT>
     /** Main output collector, that sets a proper timestamp to the StreamRecord. */
     private transient TimestampedCollector<OUT> collector;
 
+    //限制底层上下文功能的包装运行时上下文
     /** Wrapped RuntimeContext that limits the underlying context features. */
     private transient CepRuntimeContext cepRuntimeContext;
 
@@ -207,6 +211,7 @@ public class CepOperator<IN, KEY, OUT>
                 getInternalTimerService(
                         "watermark-callbacks", VoidNamespaceSerializer.INSTANCE, this);
 
+        //创建状态机实例
         nfa = nfaFactory.createNFA();
         nfa.open(cepRuntimeContext, new Configuration());
 
@@ -233,10 +238,14 @@ public class CepOperator<IN, KEY, OUT>
     public void processElement(StreamRecord<IN> element) throws Exception {
         if (isProcessingTime) {
             if (comparator == null) {
+                //在处理时间内不能有无序元素
                 // there can be no out of order elements in processing time
+                //获取NFAState,没有就新建
                 NFAState nfaState = getNFAState();
                 long timestamp = getProcessingTimeService().getCurrentProcessingTime();
+                //TODO
                 advanceTime(nfaState, timestamp);
+                //处理事件
                 processEvent(nfaState, element.getValue(), timestamp);
                 updateNFA(nfaState);
             } else {
@@ -381,6 +390,7 @@ public class CepOperator<IN, KEY, OUT>
 
     private NFAState getNFAState() throws IOException {
         NFAState nfaState = computationStates.value();
+        //如果NFAState为空，就初始化创建
         return nfaState != null ? nfaState : nfa.createInitialNFAState();
     }
 
@@ -400,6 +410,7 @@ public class CepOperator<IN, KEY, OUT>
     }
 
     /**
+     * 通过将给定事件发送给NFA并输出生成的匹配事件集来处理该事件事件序列。
      * Process the given event by giving it to the NFA and outputting the produced set of matched
      * event sequences.
      *
@@ -410,6 +421,7 @@ public class CepOperator<IN, KEY, OUT>
     private void processEvent(NFAState nfaState, IN event, long timestamp) throws Exception {
         try (SharedBufferAccessor<IN> sharedBufferAccessor = partialMatches.getAccessor()) {
             Collection<Map<String, List<IN>>> patterns =
+                    //nfa执行逻辑
                     nfa.process(
                             sharedBufferAccessor,
                             nfaState,
@@ -417,11 +429,14 @@ public class CepOperator<IN, KEY, OUT>
                             timestamp,
                             afterMatchSkipStrategy,
                             cepTimerService);
+            //处理结果？
             processMatchedSequences(patterns, timestamp);
         }
     }
 
+    //TODO
     /**
+     * 将给定NFA的时间提前到给定的时间戳。这意味着不应向nfa传递更多时间戳低于给定时间戳的事件，这可能会导致修剪和超时。
      * Advances the time for the given NFA to the given timestamp. This means that no more events
      * with timestamp <b>lower</b> than the given timestamp should be passed to the nfa, This can
      * lead to pruning and timeouts.

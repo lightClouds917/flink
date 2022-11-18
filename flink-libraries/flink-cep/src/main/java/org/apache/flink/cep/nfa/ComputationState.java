@@ -26,23 +26,40 @@ import javax.annotation.Nullable;
 import java.util.Objects;
 
 /**
+ * 封装NFA计算的currentStateName的Helper类。它指向当前的currentStateName、模式的前一个条目、当前版本和整个模式的开始时间戳。
  * Helper class which encapsulates the currentStateName of the NFA computation. It points to the
  * current currentStateName, the previous entry of the pattern, the current version and the starting
  * timestamp of the overall pattern.
  */
 public class ComputationState {
-    // pointer to the NFA currentStateName of the computation
+    /**
+     * 指向计算的NFA currentStateName的指针
+     * pointer to the NFA currentStateName of the computation
+     */
     private final String currentStateName;
 
-    // The current version of the currentStateName to discriminate the valid pattern paths in the
-    // SharedBuffer
+    /**
+     * currentStateName的当前版本，用于区分SharedBuffer中的有效模式路径
+     * The current version of the currentStateName to discriminate the valid pattern paths in the SharedBuffer
+      */
     private final DeweyNumber version;
 
-    // Timestamp of the first element in the pattern
+    /**
+     * 模式中第一个元素的时间戳，用于判断是否超时
+     * Timestamp of the first element in the pattern
+     */
     private final long startTimestamp;
 
+    /**
+     * 之前的缓冲数据项
+     * TODO
+     * （不确定信息：当前run的最后事件节点 下一个事件到达如果take会作为新的最后节点。新节点指向之前的节点。）
+     */
     @Nullable private final NodeId previousBufferEntry;
 
+    /**
+     * 开始事件id
+     */
     @Nullable private final EventId startEventID;
 
     private ComputationState(

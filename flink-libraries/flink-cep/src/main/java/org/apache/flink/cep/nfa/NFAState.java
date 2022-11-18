@@ -24,10 +24,14 @@ import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Queue;
 
-/** State kept for a {@link NFA}. */
+/**
+ * 为NFA保留状态
+ * State kept for a {@link NFA}. */
 public class NFAState {
 
     /**
+     * 半匹配队列
+     * 状态机中的当前计算状态集。这些是“活动”的中间状态，它们正在等待新的匹配事件转换到新的有效状态。
      * Current set of {@link ComputationState computation states} within the state machine. These
      * are the "active" intermediate states that are waiting for new matching events to transition
      * to new valid states.
@@ -36,7 +40,9 @@ public class NFAState {
 
     private Queue<ComputationState> completedMatches;
 
-    /** Flag indicating whether the matching status of the state machine has changed. */
+    /**
+     * 指示状态机的匹配状态是否已更改的标志
+     * Flag indicating whether the matching status of the state machine has changed. */
     private boolean stateChanged;
 
     public static final Comparator<ComputationState> COMPUTATION_STATE_COMPARATOR =
@@ -52,8 +58,10 @@ public class NFAState {
                                             : Integer.MAX_VALUE);
 
     public NFAState(Iterable<ComputationState> states) {
+        //半匹配优先级队列
         this.partialMatches = new PriorityQueue<>(COMPUTATION_STATE_COMPARATOR);
         for (ComputationState startingState : states) {
+            //起始状态都放入半匹配优先级队列中
             partialMatches.add(startingState);
         }
 

@@ -32,6 +32,7 @@ import java.io.IOException;
 import java.util.Objects;
 
 /**
+ * 使用锁引用为传入事件和{@link SharedBufferNode}实现锁定逻辑。
  * Implements locking logic for incoming event and {@link SharedBufferNode} using a lock reference
  * counter.
  */
@@ -51,6 +52,7 @@ public final class Lockable<T> {
     }
 
     /**
+     * 释放对该对象的锁定。如果没有在其上获取更多锁，此方法将返回true
      * Releases lock on this object. If no more locks are acquired on it, this method will return
      * true.
      *

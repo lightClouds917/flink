@@ -37,12 +37,16 @@ import static org.apache.flink.cep.nfa.compiler.NFAStateNameHandler.getOriginalN
 import static org.apache.flink.util.Preconditions.checkState;
 
 /**
+ * SharedBuffer的访问器，允许对底层结构进行批量操作。
+ * 只有在关闭访问器后，操作才会持久化。
  * Accessor to SharedBuffer that allows operations on the underlying structures in batches.
  * Operations are persisted only after closing the Accessor.
  */
 public class SharedBufferAccessor<V> implements AutoCloseable {
 
-    /** The sharedBuffer to store the partial matched events. */
+    /**
+     * 用于存储部分匹配事件的sharedBuffer
+     * The sharedBuffer to store the partial matched events. */
     private SharedBuffer<V> sharedBuffer;
 
     SharedBufferAccessor(SharedBuffer<V> sharedBuffer) {
@@ -77,14 +81,15 @@ public class SharedBufferAccessor<V> implements AutoCloseable {
     }
 
     /**
+     * 存储给定状态下的给定值（值+时间戳）。它将前一个元素关系指定给前一个条目。
      * Stores given value (value + timestamp) under the given state. It assigns a preceding element
      * relation to the previous entry.
      *
      * @param stateName name of the state that the event should be assigned to
      * @param eventId unique id of event assigned by this SharedBuffer
-     * @param previousNodeId id of previous entry (might be null if start of new run)
-     * @param version Version of the previous relation
-     * @return assigned id of this element
+     * @param previousNodeId id of previous entry (might be null if start of new run) 上一个条目的id（如果开始新运行，则可能为空）
+     * @param version Version of the previous relation 之前关系的版本
+     * @return assigned id of this element 此元素的已分配id
      */
     public NodeId put(
             final String stateName,
@@ -110,11 +115,12 @@ public class SharedBufferAccessor<V> implements AutoCloseable {
     }
 
     /**
+     * 返回从给定条目开始的上一个关系中的所有元素。
      * Returns all elements from the previous relation starting at the given entry.
      *
-     * @param nodeId id of the starting entry
+     * @param nodeId id of the starting entry 起始条目的id
      * @param version Version of the previous relation which shall be extracted
-     * @return Collection of previous relations starting with the given value
+     * @return Collection of previous relations starting with the given value 从给定值开始的以前关系的集合
      */
     public List<Map<String, List<EventId>>> extractPatterns(
             final NodeId nodeId, final DeweyNumber version) {
@@ -165,6 +171,7 @@ public class SharedBufferAccessor<V> implements AutoCloseable {
                         // of this previous relation
                         final SharedBufferEdge edge = lockableEdge.getElement();
                         final DeweyNumber currentVersion = extractionState.getVersion();
+                        //这里的判断很关键，该条edge的版本是当前版本的前缀的则取出该条edge的target放入ExtractionState的Entry中作为下次迭代的开始并且存入currentPath中
                         if (currentVersion.isCompatibleWith(edge.getDeweyNumber())) {
                             final NodeId target = edge.getTarget();
                             Stack<Tuple2<NodeId, SharedBufferNode>> newPath;
@@ -177,7 +184,7 @@ public class SharedBufferAccessor<V> implements AutoCloseable {
                                 newPath = new Stack<>();
                                 newPath.addAll(currentPath);
                             }
-
+                            //满足条件的话用当前edge的target作为ExtractionState的entry 版本为当前边的版本放入extractionStates中作为下次的开始。迭代使用啦extractionStates
                             extractionStates.push(
                                     new SharedBufferAccessor.ExtractionState(
                                             target != null
@@ -223,14 +230,16 @@ public class SharedBufferAccessor<V> implements AutoCloseable {
     }
 
     /**
+     * 增加给定条目的引用计数器，使其不会意外删除。
      * Increases the reference counter for the given entry so that it is not accidentally removed.
      *
      * @param node id of the entry
-     * @param version dewey number of the (potential) edge that locks the given node
+     * @param version dewey number of the (potential) edge that locks the given node 锁定给定节点的（潜在）边的杜威数
      */
     public void lockNode(final NodeId node, final DeweyNumber version) {
         Lockable<SharedBufferNode> sharedBufferNode = sharedBuffer.getEntry(node);
         if (sharedBufferNode != null) {
+            //引用计数器+1
             sharedBufferNode.lock();
             for (Lockable<SharedBufferEdge> edge : sharedBufferNode.getElement().getEdges()) {
                 if (version.isCompatibleWith(edge.getElement().getDeweyNumber())) {
@@ -242,6 +251,7 @@ public class SharedBufferAccessor<V> implements AutoCloseable {
     }
 
     /**
+     * 减少给定条目的引用计数器，以便在参考计数器达到0。
      * Decreases the reference counter for the given entry so that it can be removed once the
      * reference counter reaches 0.
      *
